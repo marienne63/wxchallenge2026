@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WxChallenge · Synoptic-Filtered EWMA</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#f4f8ff;
+    --muted:rgba(226,238,255,.66);
+    --glass:rgba(255,255,255,.09);
+    --glass-strong:rgba(255,255,255,.14);
+    --glass-border:rgba(255,255,255,.22);
+    --cyan:#4cc9f0;
+    --coral:#ff8a5c;
+    --gold:#ffd166;
+    --teal:#00c6a2;
+    --blue:#0b5fff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{min-height:100%;}
+  body{
+    margin:0; color:var(--ink); line-height:1.45;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:linear-gradient(135deg,#030b1d,#0a2a5e,#0b5fff,#0077b6,#00c6a2,#030b1d);
+    background-size:400% 400%;
+    animation:bgDrift 30s ease-in-out infinite;
+  }
+  @keyframes bgDrift{0%,100%{background-position:0% 40%}50%{background-position:100% 60%}}
+
+  /* floating ambient orbs */
+  .orb{position:fixed; border-radius:50%; filter:blur(100px); opacity:.45;
+    pointer-events:none; z-index:0; animation:float 20s ease-in-out infinite;}
+  .orb.a{width:340px;height:340px;left:-90px;top:-60px;
+    background:radial-gradient(circle,#0b5fff,transparent 70%); animation-delay:0s;}
+  .orb.b{width:300px;height:300px;right:-80px;top:34%;
+    background:radial-gradient(circle,#00c6a2,transparent 70%); animation-delay:-7s;}
+  .orb.c{width:260px;height:260px;left:8%;bottom:-70px;
+    background:radial-gradient(circle,#4cc9f0,transparent 70%); animation-delay:-13s;}
+  @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(36px,-30px) scale(1.12)}}
+
+  .hero{position:relative; z-index:1; text-align:center; padding:34px 20px 10px;}
+  .hero h1{margin:0 0 6px; font-size:1.6rem; font-weight:800; letter-spacing:.4px;
+    text-shadow:0 2px 18px rgba(0,0,0,.45);}
+  .hero p{margin:0; color:var(--muted); font-size:.88rem;}
+
+  .container{position:relative; z-index:1; max-width:560px; margin:0 auto; padding:14px 16px 48px;}
+
+  .card{
+    background:var(--glass);
+    backdrop-filter:blur(20px) saturate(170%);
+    -webkit-backdrop-filter:blur(20px) saturate(170%);
+    border:1px solid var(--glass-border);
+    border-radius:22px;
+    box-shadow:0 14px 44px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.18);
+    padding:20px; margin-bottom:16px;
+  }
+  label{display:block; font-size:.76rem; font-weight:700; color:var(--muted);
+    margin-bottom:8px; text-transform:uppercase; letter-spacing:1.2px;}
+  input[type=text]{
+    width:100%; font-size:1.5rem; font-weight:800; letter-spacing:6px; text-transform:uppercase;
+    padding:15px; border-radius:14px; text-align:center; outline:none; color:var(--ink);
+    background:rgba(255,255,255,.07); border:1px solid var(--glass-border);
+    transition:border-color .2s, box-shadow .2s;
+  }
+  input[type=text]::placeholder{color:rgba(226,238,255,.35);}
+  input[type=text]:focus{border-color:var(--cyan); box-shadow:0 0 0 3px rgba(76,201,240,.25);}
+  #runBtn{
+    width:100%; margin-top:14px; padding:17px; font-size:1.12rem; font-weight:800; letter-spacing:.4px;
+    color:#fff; border:none; border-radius:14px; cursor:pointer;
+    background:linear-gradient(135deg,var(--blue),var(--teal));
+    box-shadow:0 8px 26px rgba(11,95,255,.5), inset 0 1px 0 rgba(255,255,255,.3);
+    transition:transform .12s, box-shadow .2s, filter .2s;
+  }
+  #runBtn:hover{filter:brightness(1.08);}
+  #runBtn:active{transform:scale(.985);}
+  #runBtn:disabled{opacity:.55; cursor:wait;}
+  #status{font-size:.9rem; color:var(--muted); min-height:1.5em; margin:8px 2px 0;}
+  #error{display:none; margin-bottom:16px; padding:14px 16px; font-size:.92rem;
+    color:#ffd9d9; background:rgba(224,36,36,.16); border:1px solid rgba(255,120,120,.4);
+    border-radius:18px; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);}
+  .hidden{display:none !important;}
+
+  .results-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:4px;}
+  .results-head h2{margin:0; font-size:1.05rem; font-weight:800;}
+  .results-head span{font-size:.76rem; color:var(--muted); white-space:nowrap;}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0;}
+  .metric{background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16);
+    border-radius:16px; padding:14px 10px; text-align:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.12);}
+  .metric .v{font-size:1.8rem; font-weight:800; text-shadow:0 2px 10px rgba(0,0,0,.35);}
+  .metric .v small{font-size:.95rem; font-weight:600; color:var(--muted);}
+  .metric .k{font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;}
+  #logic{font-size:.88rem; color:rgba(240,247,255,.92); background:rgba(255,255,255,.06);
+    border-left:4px solid var(--cyan); padding:11px 13px; border-radius:0 12px 12px 0; margin:0 0 4px;}
+  #logic b{color:#fff;}
+
+  /* chart panel */
+  .chart-panel{margin-top:16px; background:rgba(4,12,30,.38);
+    border:1px solid rgba(255,255,255,.14); border-radius:18px; padding:16px 14px 12px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1);}
+  .chart-head{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;}
+  .chart-head h3{margin:0; font-size:.95rem; font-weight:800; letter-spacing:.3px;}
+  .seg{display:flex; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16);
+    border-radius:999px; padding:4px; gap:2px;}
+  .seg button{flex:1; border:none; background:transparent; color:var(--muted); border-radius:999px;
+    padding:9px 14px; font-weight:700; font-size:.82rem; cursor:pointer; white-space:nowrap; margin:0; width:auto;
+    box-shadow:none;}
+  .seg button.active{background:linear-gradient(135deg,var(--blue),var(--teal)); color:#fff;
+    box-shadow:0 4px 14px rgba(11,95,255,.45);}
+  #chartWrap{position:relative; height:290px;}
+  #chartWrap canvas{width:100% !important; height:100% !important;}
+  .chart-note{font-size:.78rem; color:var(--muted); margin:10px 2px 2px; display:flex; align-items:center; gap:8px;}
+  .sw{flex:none; width:14px; height:14px; border-radius:4px;
+    background:rgba(255,209,102,.35); border:1px solid rgba(255,209,102,.7);}
+  .chart-fallback{color:var(--muted); font-size:.85rem; text-align:center; padding:40px 10px;}
+
+  footer{position:relative; z-index:1; font-size:.74rem; color:var(--muted);
+    text-align:center; padding:0 24px 8px; text-shadow:0 1px 8px rgba(0,0,0,.4);}
+  .spinner{display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.25);
+    border-top-color:var(--cyan); border-radius:50%; animation:spin .7s linear infinite;
+    vertical-align:-2px; margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (min-width:520px){ .hero h1{font-size:1.9rem;} #chartWrap{height:320px;} }
+</style>
+</head>
+<body>
+<div class="orb a"></div><div class="orb b"></div><div class="orb c"></div>
+
+<div class="hero">
+  <h1>⛅ WxChallenge Forecaster</h1>
+  <p>Synoptic-Filtered EWMA bias correction · GFS MOS</p>
+</div>
+
+<div class="container">
+  <div class="card">
+    <label for="station">ICAO station code</label>
+    <input type="text" id="station" value="KTPA" maxlength="4" autocapitalize="characters" spellcheck="false" placeholder="KTPA">
+    <button id="runBtn">Run Forecast</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="error"></div>
+
+  <div id="results" class="card hidden">
+    <div class="results-head">
+      <h2 id="resTitle">Forecast</h2>
+      <span id="resWindow"></span>
+    </div>
+    <div class="grid">
+      <div class="metric"><div class="v"><span id="rHigh">–</span><small> °F</small></div><div class="k">High</div></div>
+      <div class="metric"><div class="v"><span id="rLow">–</span><small> °F</small></div><div class="k">Low</div></div>
+      <div class="metric"><div class="v"><span id="rWind">–</span><small> kt</small></div><div class="k">Max Wind</div></div>
+      <div class="metric"><div class="v"><span id="rPrecip">–</span><small> in</small></div><div class="k">Precipitation</div></div>
+    </div>
+    <p id="logic"></p>
+
+    <div class="chart-panel">
+      <div class="chart-head">
+        <h3 id="chartTitle">Regime History</h3>
+        <div class="seg">
+          <button data-mode="temp" class="active">🌡️ Temp</button>
+          <button data-mode="wind">💨 Wind</button>
+        </div>
+      </div>
+      <div id="chartWrap"><canvas id="wxCanvas"></canvas></div>
+      <p class="chart-note"><span class="sw"></span><span>Gold bands &amp; points = days that passed the ±45° synoptic filter — the regime your bias correction is built on.</span></p>
+    </div>
+  </div>
+
+  <footer>
+    Data: Iowa Environmental Mesonet — GFS MOS archive + ASOS observations (single CORS-open origin).<br>
+    Method: ±45° wind-direction filter → EWMA (span 4) on obs−MOS residuals. Precip = MOS baseline, uncorrected.
+  </footer>
+</div>
+
+<script>
+'use strict';
+/* ---------------- Config ---------------- */
+const IEM_MOS_URL  = 'https://mesonet.agron.iastate.edu/api/1/mos.txt';
+const IEM_ASOS_URL = 'https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py';
+const DAY_MS = 86400000;
+const FETCH_TIMEOUT_MS = 30000;
+const EWMA_SPAN = 4;
+const FILTER_DEG = 45;
+const HIST_DAYS = 14;
+
+const el = id => document.getElementById(id);
+const setStatus = (msg, spin=false) => {
+  el('status').innerHTML = msg ? (spin ? '<span class="spinner"></span>' : '') + msg : '';
+};
+const showError = msg => { const e = el('error'); e.textContent = msg; e.style.display = 'block'; };
+const hideError = () => { el('error').style.display = 'none'; };
+
+let histDays = [];   // all 14 history days: {date,mHigh,mLow,mWind,mDir,oHigh,oLow,oWind,survived}
+let wxChart = null;
+let chartMode = 'temp';
+
+/* ---------------- HTTP helpers ---------------- */
+async function fetchWithTimeout(url, label) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, mode: 'cors' });
+    if (!res.ok) throw new Error(`${label} request failed (HTTP ${res.status}).`);
+    return res;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`${label} timed out after ${FETCH_TIMEOUT_MS/1000}s. Check your connection and retry.`);
+    if (e instanceof TypeError) throw new Error(`${label} unreachable — network or CORS block. Try again on Wi-Fi.`);
+    throw e;
+  } finally { clearTimeout(t); }
+}
+const fetchText = (url, label) => fetchWithTimeout(url, label).then(r => r.text());
+
+/* ---------------- MOS parsing ---------------- */
+function parseMOS(csvText) {
+  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l.length);
+  if (lines.length < 2) return { rows: [], runtime: null };
+  const head = lines[0].split(',');
+  const ix = n => head.indexOf(n);
+  const iF = ix('ftime'), iT = ix('tmp'), iD = ix('wdr'), iS = ix('wsp'), iQ = ix('q06'), iR = ix('runtime');
+  const num = v => (v === undefined || v === '' ? null : parseFloat(v));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(',');
+    if (c.length < head.length) continue;
+    rows.push({
+      ftime: new Date(c[iF].replace(' ', 'T') + 'Z'),
+      tmp: num(c[iT]), wdr: num(c[iD]), wsp: num(c[iS]), q06: num(c[iQ])
+    });
+  }
+  const runtime = rows.length ? new Date(lines[1].split(',')[iR].replace(' ', 'T') + 'Z') : null;
+  return { rows, runtime };
+}
+function fmtRuntimeUTC(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:00Z`;
+}
+
+/* ---------------- ASOS obs parsing ---------------- */
+function parseASOS(csvText) {
+  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l.length);
+  if (lines.length < 2) return [];
+  const head = lines[0].split(',');
+  const iV = head.indexOf('valid'), iT = head.indexOf('tmpf'), iS = head.indexOf('sknt');
+  if (iV < 0 || iT < 0 || iS < 0) return [];
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(',');
+    if (!c[iV] || c[iT] === '' || c[iS] === '') continue;
+    const t = new Date(c[iV].replace(' ', 'T') + 'Z');
+    const f = parseFloat(c[iT]), w = parseFloat(c[iS]);
+    if (isNaN(t.getTime()) || isNaN(f) || isNaN(w)) continue;
+    out.push({ t, f, w });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+function buildAsosURL(asosStation, from, to) {
+  const p = n => String(n).padStart(2, '0');
+  const dp = (d, k) => `year${k}=${d.getUTCFullYear()}&month${k}=${p(d.getUTCMonth()+1)}&day${k}=${p(d.getUTCDate())}&hour${k}=${p(d.getUTCHours())}&minute${k}=${p(d.getUTCMinutes())}`;
+  return `${IEM_ASOS_URL}?station=${asosStation}&data=tmpf&data=sknt&tz=Etc%2FUTC&format=onlycomma` +
+    `&latlon=no&elev=no&missing=empty&trace=T&direct=no&report_type=3&report_type=4` +
+    `&${dp(from, 1)}&${dp(to, 2)}`;
+}
+
+/* Summarize one 06Z–06Z window from MOS rows */
+function summarizeMOS(rows, start, end) {
+  const win = rows.filter(r => r.ftime >= start && r.ftime < end && r.tmp != null);
+  if (!win.length) throw new Error('No MOS guidance covers the forecast window.');
+  const tmps = win.map(r => r.tmp);
+  const spds = win.map(r => r.wsp).filter(v => v != null);
+  const dirs = win.filter(r => r.wdr != null && r.wsp != null).map(r => ({ wdr: r.wdr, wsp: r.wsp }));
+  let q = 0;
+  for (const r of rows) if (r.ftime > start && r.ftime <= end && r.q06 != null) q += r.q06;
+  return {
+    high: Math.max(...tmps),
+    low: Math.min(...tmps),
+    maxWind: spds.length ? Math.max(...spds) : 0,
+    dir: vectorMeanDir(dirs),
+    precip: q / 100
+  };
+}
+function vectorMeanDir(pairs) {
+  if (!pairs.length) return null;
+  let su = 0, sv = 0;
+  for (const { wdr, wsp } of pairs) {
+    const rad = wdr * Math.PI / 180;
+    su += -wsp * Math.sin(rad);
+    sv += -wsp * Math.cos(rad);
+  }
+  const toward = Math.atan2(su, sv) * 180 / Math.PI;
+  return ((toward + 180) % 360 + 360) % 360;
+}
+const circDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+
+/* ---------------- EWMA ---------------- */
+function ewma(values, span) {
+  const alpha = 2 / (span + 1);
+  let e = values[0];
+  for (let i = 1; i < values.length; i++) e = alpha * values[i] + (1 - alpha) * e;
+  return e;
+}
+
+/* ---------------- Time windows (UTC) ---------------- */
+function nextWxWindow(now) {
+  const s = new Date(now); s.setUTCMinutes(0, 0, 0); s.setUTCMilliseconds(0);
+  if (s.getUTCHours() < 6) s.setUTCHours(6);
+  else { s.setUTCDate(s.getUTCDate() + 1); s.setUTCHours(6); }
+  return [s, new Date(s.getTime() + DAY_MS)];
+}
+function lastCompleteEnd(now) {
+  const s = new Date(now); s.setUTCMinutes(0, 0, 0); s.setUTCMilliseconds(0);
+  if (s.getUTCHours() < 6) s.setUTCDate(s.getUTCDate() - 1);
+  s.setUTCHours(6);
+  return s;
+}
+const fmtDay = d => d.toISOString().slice(0, 10);
+
+/* ---------------- Chart ---------------- */
+function renderChart() {
+  const wrap = el('chartWrap');
+  if (typeof Chart === 'undefined') {
+    wrap.innerHTML = '<p class="chart-fallback">Chart library failed to load (offline?). Results above are still valid.</p>';
+    return;
+  }
+  if (wxChart) { wxChart.destroy(); wxChart = null; }
+  wrap.innerHTML = '<canvas id="wxCanvas"></canvas>';
+
+  Chart.defaults.color = 'rgba(235,244,255,.72)';
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.borderColor = 'rgba(255,255,255,.08)';
+
+  const labels = histDays.map(d => d.date.slice(5));
+  const survived = histDays.map(d => d.survived);
+  el('chartTitle').textContent = `${histDays.length}-Day Regime History`;
+
+  const ptBG = c => survived[c.dataIndex] ? '#ffd166' : 'rgba(255,255,255,.28)';
+  const ptR  = c => survived[c.dataIndex] ? 5.5 : 3.5;
+
+  const bandPlugin = {
+    id: 'survivorBands',
+    beforeDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || survived.length < 2) return;
+      const x = scales.x;
+      const half = (x.getPixelForValue(1) - x.getPixelForValue(0)) / 2;
+      ctx.save();
+      survived.forEach((s, i) => {
+        if (!s) return;
+        const c = x.getPixelForValue(i);
+        ctx.fillStyle = 'rgba(255,209,102,.10)';
+        ctx.fillRect(c - half, chartArea.top, half * 2, chartArea.bottom - chartArea.top);
+      });
+      ctx.restore();
+    }
+  };
+
+  let datasets, yTitle, xStacked = false;
+  if (chartMode === 'temp') {
+    yTitle = '°F';
+    datasets = [
+      { label: 'MOS High', data: histDays.map(d => d.mHigh),
+        borderColor: '#4cc9f0', backgroundColor: '#4cc9f0', borderWidth: 2.5, tension: .35,
+        pointBackgroundColor: ptBG, pointRadius: ptR, pointBorderColor: 'rgba(0,0,0,.4)', pointBorderWidth: 1 },
+      { label: 'Observed High', data: histDays.map(d => d.oHigh),
+        borderColor: '#ff8a5c', backgroundColor: '#ff8a5c', borderWidth: 2.5, tension: .35,
+        pointBackgroundColor: ptBG, pointRadius: ptR, pointBorderColor: 'rgba(0,0,0,.4)', pointBorderWidth: 1 }
+    ];
+  } else {
+    yTitle = 'kt';
+    datasets = [
+      { type: 'bar', label: 'MOS Max Wind', data: histDays.map(d => d.mWind),
+        backgroundColor: c => survived[c.dataIndex] ? 'rgba(76,201,240,.9)' : 'rgba(76,201,240,.28)',
+        borderColor: '#4cc9f0', borderWidth: 1, borderRadius: 5, barPercentage: .9, categoryPercentage: .55 },
+      { type: 'bar', label: 'Observed Max Wind', data: histDays.map(d => d.oWind),
+        backgroundColor: c => survived[c.dataIndex] ? 'rgba(255,138,92,.9)' : 'rgba(255,138,92,.28)',
+        borderColor: '#ff8a5c', borderWidth: 1, borderRadius: 5, barPercentage: .9, categoryPercentage: .55 }
+    ];
+  }
+
+  wxChart = new Chart(wrap.querySelector('canvas').getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true, pointStyle: 'circle', padding: 14 } },
+        tooltip: {
+          backgroundColor: 'rgba(6,14,32,.94)', borderColor: 'rgba(255,255,255,.22)', borderWidth: 1,
+          titleColor: '#fff', bodyColor: 'rgba(235,244,255,.92)', padding: 11, cornerRadius: 10,
+          callbacks: {
+            footer: items => {
+              const d = histDays[items[0].dataIndex];
+              const bias = chartMode === 'temp'
+                ? `bias ${(d.oHigh - d.mHigh) >= 0 ? '+' : ''}${(d.oHigh - d.mHigh).toFixed(1)}°F`
+                : `bias ${(d.oWind - d.mWind) >= 0 ? '+' : ''}${(d.oWind - d.mWind).toFixed(1)} kt`;
+              return (d.survived ? '✓ passed ±45° filter · ' : '✗ filtered out · ') + bias;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { maxTicksLimit: 7, maxRotation: 45 } },
+        y: { title: { display: true, text: yTitle }, grid: { color: 'rgba(255,255,255,.07)' }, beginAtZero: chartMode === 'wind' }
+      }
+    },
+    plugins: [bandPlugin]
+  });
+}
+
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.seg button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  chartMode = b.dataset.mode;
+  if (histDays.length) renderChart();
+}));
+
+/* ---------------- Main pipeline ---------------- */
+async function runForecast() {
+  hideError();
+  el('results').classList.add('hidden');
+  const station = el('station').value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(station)) { showError('Enter a valid 4-letter ICAO station code (e.g., KTPA).'); return; }
+  el('runBtn').disabled = true;
+
+  try {
+    /* Step 1 — latest MOS baseline + target regime */
+    setStatus('Step 1/4 · Fetching latest GFS MOS…', true);
+    const latestTxt = await fetchText(`${IEM_MOS_URL}?station=${station}&model=GFS`, 'IEM MOS');
+    const latest = parseMOS(latestTxt);
+    if (!latest.rows.length || !latest.runtime)
+      throw new Error(`Station ${station} not found in the GFS MOS archive. Check the ICAO code.`);
+
+    const now = new Date();
+    const [wStart, wEnd] = nextWxWindow(now);
+    const base = summarizeMOS(latest.rows, wStart, wEnd);
+    if (base.dir == null) throw new Error('Could not determine a target wind direction from MOS.');
+
+    /* Step 2 — 14 historical MOS runs + 14 days of ASOS obs (parallel, single origin) */
+    const completeEnd = lastCompleteEnd(now);
+    setStatus('Step 2/4 · Fetching 14-day MOS history + observations…', true);
+    let done = 0;
+    const tick = () => {
+      done++;
+      setStatus(`Step 2/4 · Fetching 14-day MOS history + observations… ${done}/${HIST_DAYS + 1}`, true);
+    };
+    const mosJobs = [];
+    for (let k = 1; k <= HIST_DAYS; k++) {
+      const rk = new Date(latest.runtime.getTime() - k * DAY_MS);
+      const url = `${IEM_MOS_URL}?station=${station}&model=GFS&runtime=${encodeURIComponent(fmtRuntimeUTC(rk))}`;
+      mosJobs.push(fetchText(url, 'IEM MOS').then(t => { tick(); return { k, text: t }; }));
+    }
+    const asosStation = (station.length === 4 && station[0] === 'K') ? station.slice(1) : station;
+    const obsFrom = new Date(completeEnd.getTime() - HIST_DAYS * DAY_MS);
+    const obsJob = fetchText(buildAsosURL(asosStation, obsFrom, now), 'IEM observations')
+      .then(t => { tick(); return parseASOS(t); });
+
+    const [histTexts, obs] = await Promise.all([Promise.all(mosJobs), obsJob]);
+    if (!obs.length)
+      throw new Error(`No observations found for ${station} in the last ${HIST_DAYS} days.`);
+
+    /* Step 3 — build full 14-day history, then synoptic filter */
+    setStatus('Step 3/4 · Applying synoptic filter…', true);
+    histDays = [];
+    for (const { k, text } of histTexts) {
+      const { rows } = parseMOS(text);
+      const hs = new Date(wStart.getTime() - k * DAY_MS);
+      const he = new Date(wEnd.getTime() - k * DAY_MS);
+      let m;
+      try { m = summarizeMOS(rows, hs, he); } catch { continue; }   // skip cycles missing from archive
+      const oStart = new Date(completeEnd.getTime() - k * DAY_MS);
+      const oEnd = new Date(completeEnd.getTime() - (k - 1) * DAY_MS);
+      const wo = obs.filter(o => o.t >= oStart && o.t < oEnd);
+      if (!wo.length) continue;
+      histDays.push({
+        date: fmtDay(hs),
+        mHigh: m.high, mLow: m.low, mWind: m.maxWind, mDir: m.dir,
+        oHigh: Math.max(...wo.map(o => o.f)),
+        oLow: Math.min(...wo.map(o => o.f)),
+        oWind: Math.max(...wo.map(o => o.w)),
+        survived: m.dir != null && circDist(m.dir, base.dir) <= FILTER_DEG
+      });
+    }
+    histDays.sort((a, b) => a.date.localeCompare(b.date));   // oldest → newest
+    const kept = histDays.filter(d => d.survived);
+    if (!kept.length)
+      throw new Error(`No days passed the ±${FILTER_DEG}° synoptic filter around ${Math.round(base.dir)}°. Try again later.`);
+
+    /* Step 4 — EWMA on obs−MOS residuals of surviving days */
+    setStatus('Step 4/4 · Computing EWMA biases…', true);
+    const bHigh = ewma(kept.map(d => d.oHigh - d.mHigh), EWMA_SPAN);
+    const bLow  = ewma(kept.map(d => d.oLow - d.mLow), EWMA_SPAN);
+    const bWind = ewma(kept.map(d => d.oWind - d.mWind), EWMA_SPAN);
+
+    /* Step 5 — apply + render */
+    const fHigh = Math.round(base.high + bHigh);
+    const fLow = Math.round(base.low + bLow);
+    const fWind = Math.round(base.maxWind + bWind);
+    const fPrecip = base.precip;   // strictly baseline — no EWMA
+
+    el('resTitle').textContent = `FINAL WXCHALLENGE SUBMISSION (${station})`;
+    el('resWindow').textContent = `${fmtDay(wStart)} 06Z → ${fmtDay(wEnd)} 06Z`;
+    el('rHigh').textContent = fHigh;
+    el('rLow').textContent = fLow;
+    el('rWind').textContent = fWind;
+    el('rPrecip').textContent = fPrecip.toFixed(2);
+    const sgn = v => (v >= 0 ? '+' : '') + v.toFixed(2);
+    el('logic').innerHTML =
+      `<b>Correction Logic:</b> ${kept.length} of ${histDays.length} days survived the ±${FILTER_DEG}° filter ` +
+      `around the ${Math.round(base.dir)}° target regime (${kept.map(d => d.date.slice(5)).join(', ')}). ` +
+      `EWMA (span ${EWMA_SPAN}) biases applied — High ${sgn(bHigh)}°F, Low ${sgn(bLow)}°F, ` +
+      `Wind ${sgn(bWind)} kt — to MOS baseline ${Math.round(base.high)}/${Math.round(base.low)}/${Math.round(base.maxWind)} kt. ` +
+      `Precip held at MOS baseline ${fPrecip.toFixed(2)}″ (no correction).`;
+    el('results').classList.remove('hidden');
+    renderChart();
+    setStatus('');
+    el('results').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    showError(err.message || 'Unexpected error. Please try again.');
+    setStatus('');
+  } finally {
+    el('runBtn').disabled = false;
+  }
+}
+
+el('runBtn').addEventListener('click', runForecast);
+el('station').addEventListener('keydown', e => { if (e.key === 'Enter') runForecast(); });
+</script>
+</body>
+</html>
